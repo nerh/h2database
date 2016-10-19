@@ -32,7 +32,9 @@ public class TestDuplicateKeyUpdate extends TestBase {
         deleteDb("duplicateKeyUpdate");
         Connection conn = getConnection("duplicateKeyUpdate;MODE=MySQL");
         testDuplicateOnPrimary(conn);
+        testDuplicateOnCompoundPrimary(conn);
         testDuplicateOnUnique(conn);
+        testDuplicateOnUniqueConstrainDefinedAfterPrimary(conn);
         testDuplicateCache(conn);
         testDuplicateExpression(conn);
         testOnDuplicateKeyInsertBatch(conn);
@@ -75,6 +77,40 @@ public class TestDuplicateKeyUpdate extends TestBase {
         assertEquals("SOME TEXT", rs.getNString(1));
     }
 
+    private void testDuplicateOnCompoundPrimary(Connection conn) throws SQLException {
+        Statement stat = conn.createStatement();
+        ResultSet rs;
+
+        stat.execute("CREATE TABLE table_test_compound (\n" +
+		"  id bigint(20) NOT NULL ,\n" +
+                "  a_text varchar(254) NOT NULL,\n" +
+                "  some_text varchar(254) NULL,\n" +
+                "  PRIMARY KEY (id, a_text)\n" +
+                ") ;");
+
+        stat.execute("INSERT INTO table_test_compound ( id, a_text, some_text ) VALUES " +
+                "(1, 'aaaaaaaaaa', 'aaaaaaaaaa'), " +
+                "(2, 'bbbbbbbbbb', 'bbbbbbbbbb'), " +
+                "(3, 'cccccccccc', 'cccccccccc'), " +
+                "(4, 'dddddddddd', 'dddddddddd'), " +
+                "(5, 'eeeeeeeeee', 'eeeeeeeeee')");
+
+        stat.execute("INSERT INTO table_test_compound ( id , a_text, some_text ) " +
+                "VALUES (1, 'aaaaaaaaaa', 'abcdefghij') " +
+                "ON DUPLICATE KEY UPDATE some_text='UPDATE'");
+
+        rs = stat.executeQuery("SELECT some_text FROM table_test_compound where id = 1");
+        rs.next();
+        assertEquals("UPDATE", rs.getNString(1));
+
+	stat.execute("INSERT INTO table_test ( id , a_text, some_text ) " +
+                "VALUES (3, 'zzzzzzzzzz', 'SOME TEXT') " +
+                "ON DUPLICATE KEY UPDATE some_text=values(some_text)");
+	rs = stat.executeQuery("SELECT some_text FROM table_test where id = 3");
+	rs.next();
+	assertEquals("SOME TEXT", rs.getNString(1));
+    }
+
     private void testDuplicateOnUnique(Connection conn) throws SQLException {
         Statement stat = conn.createStatement();
         ResultSet rs;
@@ -115,6 +151,25 @@ public class TestDuplicateKeyUpdate extends TestBase {
                 "FROM table_test2 where a_text = 'b'");
         rs.next();
         assertEquals("test", rs.getNString(1));
+    }
+
+    private void testDuplicateOnUniqueConstrainDefinedAfterPrimary(Connection conn) throws SQLException {
+        Statement stat = conn.createStatement();
+        ResultSet rs;
+        stat.execute("CREATE TABLE table_test_uniq (\n" +
+                "  id int PRIMARY KEY,\n" +
+                "  dup int,\n" +
+                "  counter int,\n" +
+		"  UNIQUE(dup)\n" + ") ;");
+
+        stat.execute("INSERT INTO table_test_uniq (id, dup, counter ) VALUES (1, 1, 1)");
+
+        stat.execute("INSERT INTO table_test_uniq (id, dup, counter ) " +
+                "VALUES (2, 1, 1) ON DUPLICATE KEY UPDATE counter = counter + VALUES(counter)");
+
+        rs = stat.executeQuery("SELECT counter FROM table_test_uniq where dup = 1");
+        rs.next();
+        assertEquals(2, rs.getInt(1));
     }
 
     private void testDuplicateCache(Connection conn) throws SQLException {
